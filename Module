@@ -1,0 +1,99 @@
+module dna_reader #(
+    parameter DONGLE_TARGET = 64'h01441442251ea85c,
+    parameter GEN_DEBUG = 1
+)(
+    input  logic        clk,
+    input  logic        rst,
+    output logic [63:0] o_FUSE_DNA,
+    output logic [63:0] o_DNA_PORT,
+    output logic        o_ID_match
+);
+
+
+    typedef enum logic [2:0] {
+        POWERUP,
+        LOAD,
+        READ,
+        COMPARE,
+        RUN
+    } dna_fsm_t;
+
+
+    logic [56:0] DNA_value;
+    logic [63:0] FUSE_DNA;
+    logic        DNA_shift;
+    logic        DNA_read;
+    logic        DNA_out;
+    logic        ID_match;
+    logic [7:0]  DNA_count;
+    logic [7:0]  DNA_FSM_dbg;
+    dna_fsm_t    DNA_FSM;
+
+
+    DNA_PORT dna_port_inst (
+        .DOUT  (DNA_out),
+        .CLK   (clk),
+        .DIN   (1'b0),
+        .READ  (DNA_read),
+        .SHIFT (DNA_shift)
+    );
+
+
+    assign o_DNA_PORT = {7'b0, DNA_value};
+    assign o_FUSE_DNA = DONGLE_TARGET;
+
+
+    always_ff @(posedge clk or posedge rst) begin
+        if (rst) begin
+            DNA_FSM     <= POWERUP;
+            DNA_shift   <= 1'b0;
+            DNA_read    <= 1'b0;
+            DNA_count   <= 8'h00;
+            DNA_FSM_dbg <= 8'hFF;
+            DNA_value   <= '0;
+            FUSE_DNA    <= '0;
+            ID_match    <= 1'b0;
+            o_ID_match  <= 1'b0;
+        end else begin
+            case (DNA_FSM)
+                POWERUP: begin
+                    DNA_FSM     <= LOAD;
+                    DNA_FSM_dbg <= 8'h00;
+                end
+                LOAD: begin
+                    DNA_FSM     <= READ;
+                    DNA_FSM_dbg <= 8'h01;
+                    DNA_read    <= 1'b1;
+                end
+                READ: begin
+                    DNA_FSM_dbg <= 8'h02;
+                    DNA_read    <= 1'b0;
+                    DNA_shift   <= 1'b1;
+                    DNA_count   <= DNA_count + 1'b1;
+                    
+                    if (DNA_count == 8'd57) begin
+                        DNA_FSM <= COMPARE;
+                    end
+                    
+                    DNA_value <= {DNA_value[55:0], DNA_out};
+                    FUSE_DNA  <= {DNA_out, FUSE_DNA[63:1]};
+                end
+                COMPARE: begin
+                    DNA_FSM_dbg <= 8'h03;
+                    DNA_FSM     <= RUN;
+                    
+                    if (DONGLE_TARGET[56:0] != DNA_value) begin
+                        ID_match <= 1'b1;
+                    end
+                end
+                RUN: begin
+                    DNA_FSM_dbg <= 8'h04;
+                end
+                default: DNA_FSM <= POWERUP;
+            endcase
+
+            o_ID_match <= ID_match;
+        end
+    end
+
+endmodule
